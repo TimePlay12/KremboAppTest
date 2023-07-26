@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, ImageBackground, TouchableOpacity, Alert, Modal
 import { collection, query, onSnapshot } from 'firebase/firestore';
 import db from '../firebaseConfig';
 
-const OptionButton = ({ title, onChangeName, selectedNames }) => {
+const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOption, setSelectedOption] = useState(title);
   const [options, setOptions] = useState([]);
@@ -21,22 +21,14 @@ const OptionButton = ({ title, onChangeName, selectedNames }) => {
     return () => unsubscribe();
   }, []);
 
-  const handlePress = () => {
-    if (selectedOption !== title) {
-      Alert.alert(
-        'Confirmation',
-        'החונך תפוס האם אתה בטוח שאתה רוצה?',
-        [
-          {
-            text: 'No',
-            style: 'cancel',
-          },
-          {
-            text: 'Yes',
-            onPress: () => onChangeName(selectedOption),
-          },
-        ],
-      );
+  const handlePress = (uniqueOption) => {
+    const [option] = uniqueOption.split('-');
+    if (selectedNames.includes(uniqueOption)) {
+      Alert.alert('Error', 'This option has already been selected.');
+    } else {
+      setSelectedOption(option);
+      setModalVisible(false);
+      onChangeName(uniqueOption);
     }
   };
 
@@ -44,9 +36,9 @@ const OptionButton = ({ title, onChangeName, selectedNames }) => {
     <View>
       <TouchableOpacity
         onPress={() => setModalVisible(true)}
-        style={[styles.button, selectedNames.includes(selectedOption) && { backgroundColor: 'red' }]}
+        style={styles.button}
       >
-        <Text style={[styles.buttonText, selectedNames.includes(selectedOption) && { color: 'white' }]}>
+        <Text style={styles.buttonText}>
           {selectedOption}
         </Text>
       </TouchableOpacity>
@@ -54,14 +46,11 @@ const OptionButton = ({ title, onChangeName, selectedNames }) => {
       <Modal animationType="slide" transparent={true} visible={modalVisible}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <View style={{ backgroundColor: 'white', padding: 35, alignItems: 'center', borderRadius: 10 }}>
-            {options.map(option => (
+            {options.map((option, index) => (
               <Button
-                key={option}
+                key={`${option}-${index}`}
                 title={option}
-                onPress={() => {
-                  setSelectedOption(option);
-                  setModalVisible(false);
-                }}
+                onPress={() => handlePress(`${option}-${index}`)}
               />
             ))}
             <Button title="חזור" color="red" onPress={() => setModalVisible(false)} />
@@ -89,12 +78,10 @@ export default function ApprenticePlacement({ navigation }) {
     return () => unsubscribe();
   }, []);
 
-  const handleChangeName = (selectedName) => {
-    setSelectedNames(prevState => {
-      // Deselect the previously selected name in the other rows
-      const updatedNames = prevState.filter(name => name !== selectedName);
-      return [...updatedNames, selectedName];
-    });
+  const handleChangeName = (selectedName, index) => {
+    const updatedNames = [...selectedNames];
+    updatedNames[index] = selectedName;
+    setSelectedNames(updatedNames);
   };
 
   return (
@@ -116,7 +103,7 @@ export default function ApprenticePlacement({ navigation }) {
         {names.map((name, index) => (
           <View key={index} style={styles.row}>
             <View style={styles.column1}>
-              <OptionButton title="חניך" onChangeName={handleChangeName} selectedNames={selectedNames} />
+              <OptionButton title="חניך" onChangeName={(selectedName) => handleChangeName(selectedName, index)} selectedNames={selectedNames} setSelectedNames={setSelectedNames} />
             </View>
             <View style={styles.column2}>
               <Text style={styles.columnText}>{name}</Text>
