@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ImageBackground, TouchableOpacity, Alert, Modal, Button } from 'react-native';
-import { collection, query, onSnapshot } from 'firebase/firestore';
+import { StyleSheet, Text, View, ImageBackground, TouchableOpacity, Alert, Modal, Button, ScrollView } from 'react-native';
+import { collection, query, onSnapshot, doc, updateDoc, getDoc, deleteField } from 'firebase/firestore';
 import db from '../firebaseConfig';
 
-const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) => {
+const OptionButton = ({ title, onChangeName, assignedKid, removeAssignedKid }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedOption, setSelectedOption] = useState(title);
   const [options, setOptions] = useState([]);
@@ -13,7 +13,7 @@ const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const optionsArr = [];
       querySnapshot.forEach((doc) => {
-        optionsArr.push(doc.data().name);
+        optionsArr.push({ name: doc.data().name, id: doc.id, isAssigned: doc.data().isAssigned });
       });
       setOptions(optionsArr);
     });
@@ -21,14 +21,45 @@ const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) 
     return () => unsubscribe();
   }, []);
 
-  const handlePress = (uniqueOption) => {
-    const [option] = uniqueOption.split('-');
-    if (selectedNames.includes(uniqueOption)) {
-      Alert.alert('Error', 'This option has already been selected.');
+  useEffect(() => {
+    if (assignedKid) {
+      const assignedOption = options.find(option => option.id === assignedKid);
+      if (assignedOption) {
+        setSelectedOption(assignedOption.name);
+      }
+    }
+  }, [assignedKid, options]);
+
+  const handlePress = async (uniqueOption) => {
+    const [option, id] = uniqueOption.split('-');
+    const docRef = doc(db, '/הוד השרון/ממלאכתי א/שכבג', id);
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists() && docSnap.data().isAssigned) {
+      Alert.alert(
+        'Warning',
+        'This kid is already assigned. Are you sure you want to reassign?',
+        [
+          {
+            text: 'No',
+            style: 'cancel',
+          },
+          {
+            text: 'Yes',
+            onPress: async () => {
+              await updateDoc(docRef, { isAssigned: false });
+              setSelectedOption(option);
+              setModalVisible(false);
+              onChangeName(id);
+            },
+          },
+        ],
+        { cancelable: false },
+      );
     } else {
       setSelectedOption(option);
       setModalVisible(false);
-      onChangeName(uniqueOption);
+      onChangeName(id);
     }
   };
 
@@ -48,11 +79,12 @@ const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) 
           <View style={{ backgroundColor: 'white', padding: 35, alignItems: 'center', borderRadius: 10 }}>
             {options.map((option, index) => (
               <Button
-                key={`${option}-${index}`}
-                title={option}
-                onPress={() => handlePress(`${option}-${index}`)}
+                key={`${option.name}-${index}`}
+                title={option.name}
+                onPress={() => handlePress(`${option.name}-${option.id}`)}
               />
             ))}
+            <Button title="Remove" color="red" onPress={() => { removeAssignedKid(); setModalVisible(false); }} />
             <Button title="חזור" color="red" onPress={() => setModalVisible(false)} />
           </View>
         </View>
@@ -63,26 +95,51 @@ const OptionButton = ({ title, onChangeName, selectedNames, setSelectedNames }) 
 
 export default function ApprenticePlacement({ navigation }) {
   const [names, setNames] = useState([]);
-  const [selectedNames, setSelectedNames] = useState([]);
 
-  useEffect(() => {
+  const fetchNames = () => {
     const q = query(collection(db, '/הוד השרון/ממלאכתי א/חניכים'));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const namesArr = [];
       querySnapshot.forEach((doc) => {
-        namesArr.push(doc.data().name);
+        namesArr.push({ name: doc.data().name, id: doc.id, assignedKid1: doc.data().assignedKid1, assignedKid2: doc.data().assignedKid2 });
       });
       setNames(namesArr);
     });
 
-    return () => unsubscribe();
+    return unsubscribe;
+  };
+
+  useEffect(() => {
+    return fetchNames();
   }, []);
 
-  const handleChangeName = (selectedName, index) => {
-    const updatedNames = [...selectedNames];
-    updatedNames[index] = selectedName;
-    setSelectedNames(updatedNames);
+  const handleChangeName = async (selectedName, index, kidNumber) => {
+    const updatedNames = [...names];
+    updatedNames[index][`assignedKid${kidNumber}`] = selectedName;
+    setNames(updatedNames);
+
+    const docRef = doc(db, '/הוד השרון/ממלאכתי א/חניכים', updatedNames[index].id);
+    await updateDoc(docRef, {
+      [`assignedKid${kidNumber}`]: selectedName
+    });
+
+    fetchNames();
   };
+
+  const handleRemoveAssignedKid = async (index, kidNumber) => {
+    const updatedNames = [...names];
+    delete updatedNames[index][`assignedKid${kidNumber}`];
+    setNames(updatedNames);
+
+    const docRef = doc(db, '/הוד השרון/ממלאכתי א/חניכים', updatedNames[index].id);
+    await updateDoc(docRef, {
+      [`assignedKid${kidNumber}`]: deleteField()
+    });
+
+    fetchNames();
+  };
+
+  const ChartContainer = names.length > 5 ? ScrollView : View;
 
   return (
     <ImageBackground source={require('../Background/MainScreen.jpg')} style={styles.container} resizeMode="cover">
@@ -91,7 +148,7 @@ export default function ApprenticePlacement({ navigation }) {
           <Text style={styles.buttonText}>חזור</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.chartContainer}>
+      <ChartContainer style={styles.chartContainer}>
         <View style={styles.row}>
           <View style={styles.column1}>
             <Text style={styles.columnText}>חונכים</Text>
@@ -100,20 +157,23 @@ export default function ApprenticePlacement({ navigation }) {
             <Text style={styles.columnText}>חניכים</Text>
           </View>
         </View>
-        {names.map((name, index) => (
+        {names.map((nameObj, index) => (
           <View key={index} style={styles.row}>
             <View style={styles.column1}>
-              <OptionButton title="חניך" onChangeName={(selectedName) => handleChangeName(selectedName, index)} selectedNames={selectedNames} setSelectedNames={setSelectedNames} />
+              <OptionButton title="חונך" onChangeName={(selectedName) => handleChangeName(selectedName, index, 1)} removeAssignedKid={() => handleRemoveAssignedKid(index, 1)} assignedKid={nameObj.assignedKid1} />
+              <OptionButton title="חונך" onChangeName={(selectedName) => handleChangeName(selectedName, index, 2)} removeAssignedKid={() => handleRemoveAssignedKid(index, 2)} assignedKid={nameObj.assignedKid2} />
             </View>
             <View style={styles.column2}>
-              <Text style={styles.columnText}>{name}</Text>
+              <Text style={styles.columnText}>{nameObj.name}</Text>
             </View>
           </View>
         ))}
-      </View>
+      </ChartContainer>
     </ImageBackground>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {
@@ -140,7 +200,7 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     width: '80%',
-    height: '30%',
+    height: '80%',
     position: 'absolute',
     top: 120,
   },
